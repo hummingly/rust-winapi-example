@@ -10,32 +10,31 @@ mod utility;
 use menu::{create_menu, EditEntries, FileEntries, Menus};
 use utility::{error_msgbox, win32_string};
 
-use std::mem::zeroed;
 use std::ptr::{null, null_mut};
 
 use gdi32::GetStockObject;
-use kernel32::GetModuleHandleW;
 
 use user32::{CreateMenu, CreateWindowExW, MessageBoxW, RegisterClassW, ShowWindow, UpdateWindow};
 use user32::{DispatchMessageW, GetMessageW, PostQuitMessage, SendMessageW, TranslateMessage};
 use user32::{DefWindowProcW, DestroyWindow, FindWindowExW, GetClientRect, MoveWindow, SetWindowPos};
 
 use winapi::minwindef::{HINSTANCE, LPARAM, LRESULT, TRUE, UINT, WPARAM};
-use winapi::windef::{HCURSOR, HFONT, HICON, HWND, RECT};
+use winapi::windef::{HCURSOR, HFONT, HICON, HWND, POINT, RECT};
 use winapi::wingdi::DEFAULT_GUI_FONT;
 use winapi::winuser::{MB_YESNO, MSG, WNDCLASSW};
 use winapi::winuser::{CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, ES_AUTOVSCROLL, ES_MULTILINE,
                       WS_CHILD, WS_OVERLAPPEDWINDOW, WS_VISIBLE, WS_VSCROLL};
 use winapi::winuser::{SWP_NOZORDER, SW_SHOWDEFAULT, WM_CLOSE, WM_COMMAND, WM_COPY, WM_CREATE,
-                      WM_CUT, WM_DESTROY, WM_SETFONT, WM_SIZE};
+                      WM_CUT, WM_DESTROY, WM_PASTE, WM_SETFONT, WM_SIZE, WM_UNDO};
 
 //Window application entry function WinMain
 //(body could also be put into fn main() instead of creating a new function)
-fn create_win_main(hinstance: HINSTANCE) -> u32 {
+fn create_win_main() -> u32 {
     let class = win32_string("mainwindow"); //class name of window
     let title = win32_string("Project: HotJelly Marmelade");
 
     unsafe {
+        let hinstance = 0 as HINSTANCE; //It's the same as calling null_mut() or zeroed()
         let wndclass = WNDCLASSW {
             //Structure of the window
             style: CS_HREDRAW | CS_VREDRAW,
@@ -83,7 +82,15 @@ fn create_win_main(hinstance: HINSTANCE) -> u32 {
                     ShowWindow(hwnd_main, SW_SHOWDEFAULT);
                     UpdateWindow(hwnd_main);
                     //Messaging with OS
-                    let mut msg: MSG = zeroed();
+                    let mut msg = MSG {
+                        //Initialize MSG struct with 0 (unsafer alternative: zeroed(), uninitialized())
+                        hwnd: 0 as HWND,
+                        message: 0,
+                        wParam: 0,
+                        lParam: 0,
+                        time: 0,
+                        pt: POINT { x: 0, y: 0 },
+                    };
                     while GetMessageW(&mut msg as *mut MSG, 0 as HWND, 0, 0) != 0 {
                         TranslateMessage(&msg as *const MSG);
                         DispatchMessageW(&msg as *const MSG);
@@ -103,12 +110,12 @@ unsafe extern "system" fn message_handler(
     lparam: LPARAM,  //More message specified information
 ) -> LRESULT {
     let mut rc_client = RECT {
-        left: CW_USEDEFAULT, //Width and height of the client area of
-        top: CW_USEDEFAULT,  //the main window
-        right: CW_USEDEFAULT,
-        bottom: CW_USEDEFAULT,
+        //Initialize rect struct with 0
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
     };
-
     let hwnd_main_edit = FindWindowExW(
         hwnd_main,
         0 as HWND,
@@ -118,6 +125,7 @@ unsafe extern "system" fn message_handler(
 
     match message {
         WM_CREATE => {
+            let hinstance_child = 0 as HINSTANCE;
             let hwnd_edit = CreateWindowExW(
                 0,
                 win32_string("EDIT").as_ptr() as *const u16, //Needs to be class "Edit Control" (system defined)
@@ -129,7 +137,7 @@ unsafe extern "system" fn message_handler(
                 100,
                 hwnd_main,
                 null_mut(),
-                GetModuleHandleW(null()),
+                hinstance_child,
                 null_mut(),
             );
 
@@ -153,15 +161,8 @@ unsafe extern "system" fn message_handler(
             }
         }
         WM_SIZE => {
-            let hwnd_main_edit = FindWindowExW(
-                hwnd_main,
-                0 as HWND,
-                win32_string("EDIT").as_ptr() as *const u16,
-                null(),
-            );
-
             if hwnd_main_edit.is_null() {
-                error_msgbox("Failed to find Edit control!");
+                error_msgbox("Failed to resize Edit control!");
                 0
             } else {
                 GetClientRect(hwnd_main, &mut rc_client as *mut RECT);
@@ -192,8 +193,14 @@ unsafe extern "system" fn message_handler(
                 PostQuitMessage(0);
                 0
             }
-            Some(Menus::Edit(EditEntries::Redo)) => return 0,
-            Some(Menus::Edit(EditEntries::Repeat)) => return 0,
+            Some(Menus::Edit(EditEntries::Redo)) => {
+                SendMessageW(hwnd_main_edit, WM_UNDO, 0, i64::from(TRUE)); //I need a better undo function...
+                0
+            }
+            Some(Menus::Edit(EditEntries::Repeat)) => {
+                SendMessageW(hwnd_main_edit, WM_UNDO, 0, i64::from(TRUE)); //I need a better undo function...
+                0
+            }
             Some(Menus::Edit(EditEntries::Cut)) => {
                 SendMessageW(hwnd_main_edit, WM_CUT, 0, i64::from(TRUE));
                 0
@@ -202,7 +209,10 @@ unsafe extern "system" fn message_handler(
                 SendMessageW(hwnd_main_edit, WM_COPY, 0, i64::from(TRUE));
                 0
             }
-            Some(Menus::Edit(EditEntries::Paste)) => return 0,
+            Some(Menus::Edit(EditEntries::Paste)) => {
+                SendMessageW(hwnd_main_edit, WM_PASTE, 0, i64::from(TRUE));
+                0
+            }
             Some(Menus::Edit(EditEntries::Search)) => {
                 error_msgbox("Not implemented yet.");
                 0
@@ -237,8 +247,5 @@ unsafe extern "system" fn message_handler(
 }
 
 fn main() {
-    unsafe {
-        let hinstance = GetModuleHandleW(null());
-        create_win_main(hinstance);
-    }
+    create_win_main();
 }
