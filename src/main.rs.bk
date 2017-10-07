@@ -146,10 +146,7 @@ fn create_main_window(class: Vec<u16>, title: Vec<u16>) -> usize {
 }
 
 fn main() {
-    create_main_window(
-        "mainwindow".to_wide(),
-        "Project: HotJelly Marmelade".to_wide(),
-    );
+    create_main_window("mainwindow".to_wide(), "Project: HotJelly Marmelade".to_wide());
 
     unsafe {
         let mut msg: MSG = WinStruct::initialized();
